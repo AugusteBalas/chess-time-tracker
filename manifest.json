@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Chess.com Time Tracker",
+  "version": "1.3.3",
+  "description": "Tracks your time on chess.com per game & time control via per-move timestamps. Better TC detection, solid de-dup, and reliable UI.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "*://www.chess.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.chess.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Chess.com Time Tracker"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
