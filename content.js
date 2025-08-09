@@ -33,7 +33,27 @@
   }
 
   function getClocks() {
-    const nodes = Array.from(document.querySelectorAll('.clock-time-monospace[role="timer"], [role="timer"], [class*="clock"], .v5-game-clock, time')).filter(el => /\d{1,2}:\d{2}(:\d{2})?/.test((el.textContent||'').trim()));
+    // Only target the specific clock elements, avoid ratings/elo
+    const clockSelectors = [
+      '.clock-time-monospace[role="timer"]',  // Primary Chess.com clock
+      '.clock-component .clock-time-monospace', // Clock inside clock component
+    ];
+    
+    let nodes = [];
+    for (const selector of clockSelectors) {
+      const found = Array.from(document.querySelectorAll(selector));
+      nodes = nodes.concat(found);
+    }
+    
+    // Filter for valid time format and exclude rating-like elements
+    nodes = nodes.filter(el => {
+      const text = (el.textContent || '').trim();
+      const isTimeFormat = /^\d{1,2}:\d{2}(:\d{2})?$/.test(text);
+      const isNotRating = !el.closest('.cc-user-rating, .rating, [class*="rating"]');
+      log('getClocks: checking', text, 'isTimeFormat:', isTimeFormat, 'isNotRating:', isNotRating);
+      return isTimeFormat && isNotRating;
+    });
+    
     const uniq = [];
     const seen = new Set();
     for (const el of nodes) {
@@ -41,8 +61,13 @@
       const key = t+'|'+(el.offsetTop|0)+'|'+(el.offsetLeft|0);
       if (!seen.has(key)) { seen.add(key); uniq.push(el); }
     }
-    uniq.sort((a,b) => (b.getBoundingClientRect().width*b.getBoundingClientRect().height) - (a.getBoundingClientRect().width*a.getBoundingClientRect().height));
-    return uniq.slice(0,2).map(el => parseTimeStr((el.textContent||'').trim())).filter(v => v!=null);
+    
+    // Sort by position (top to bottom)
+    uniq.sort((a,b) => (a.offsetTop || 0) - (b.offsetTop || 0));
+    
+    const times = uniq.map(el => parseTimeStr((el.textContent||'').trim())).filter(v => v!=null);
+    log('getClocks: final times in seconds:', times);
+    return times;
   }
 
   function sampleClocks() {
@@ -76,35 +101,41 @@
   const getMoveCount = () => document.querySelectorAll('[data-ply]').length;
 
   function detectResultText() {
-    // Method 1: Direct .game-result selector (most reliable)
-    const gameResult = document.querySelector('.game-result, span.game-result');
-    if (gameResult) {
-      let result = (gameResult.textContent || '').trim();
-      log('detectResultText: found .game-result=', `"${result}"`);
+    log('detectResultText: starting detection...');
+    
+    // Method 1: Look for .game-result specifically
+    const gameResultElements = document.querySelectorAll('.game-result, span.game-result');
+    for (const el of gameResultElements) {
+      let result = (el.textContent || '').trim();
+      log('detectResultText: found .game-result element with text:', `"${result}"`);
       if (result) {
-        // Normalize whitespace and extract result
+        // Clean and check for standard results
         result = result.replace(/\s+/g, '');
-        if (result.includes('1-0')) return '1-0';
-        if (result.includes('0-1')) return '0-1'; 
-        if (result.includes('1/2-1/2') || result.includes('½-½')) return '1/2-1/2';
-        // Return raw result if it looks like a chess result
-        if (/^[01½][-\/][01½]/.test(result)) return result;
+        if (result === '1-0' || result.includes('1-0')) return '1-0';
+        if (result === '0-1' || result.includes('0-1')) return '0-1'; 
+        if (result === '1/2-1/2' || result.includes('1/2-1/2') || result.includes('½-½')) return '1/2-1/2';
       }
     }
     
-    // Method 2: Search all text content for patterns
-    const allText = document.body.innerText || '';
-    log('detectResultText: searching in body text...');
+    // Method 2: Check main line row for game result
+    const mainLineResult = document.querySelector('.main-line-row.result-row .game-result');
+    if (mainLineResult) {
+      let result = (mainLineResult.textContent || '').trim();
+      log('detectResultText: found main-line result:', `"${result}"`);
+      if (result === '1-0') return '1-0';
+      if (result === '0-1') return '0-1';
+      if (result === '1/2-1/2' || result === '½-½') return '1/2-1/2';
+    }
     
-    // Look for exact patterns
-    if (allText.includes('1-0')) return '1-0';
-    if (allText.includes('0-1')) return '0-1';
-    if (allText.includes('1/2-1/2') || allText.includes('½-½')) return '1/2-1/2';
-    
-    // Personal indicators as fallback
-    if (/You won|Victoire|Gagné/i.test(allText)) return 'win';
-    if (/You lost|Défaite|Perdu/i.test(allText)) return 'loss';
-    if (/Draw|Nulle/i.test(allText)) return 'draw';
+    // Method 3: Check game over message
+    const gameOverMsg = document.querySelector('.game-over-message-component');
+    if (gameOverMsg) {
+      const text = (gameOverMsg.textContent || '').trim();
+      log('detectResultText: checking game over message:', text);
+      if (text.includes('1-0')) return '1-0';
+      if (text.includes('0-1')) return '0-1';
+      if (text.includes('1/2-1/2') || text.includes('½-½') || /draw/i.test(text)) return '1/2-1/2';
+    }
     
     log('detectResultText: no result found');
     return null;
