@@ -76,39 +76,35 @@
   const getMoveCount = () => document.querySelectorAll('[data-ply]').length;
 
   function detectResultText() {
-    // Method 1: Use the specific game-result selector
+    // Method 1: Direct .game-result selector (most reliable)
     const gameResult = document.querySelector('.game-result, span.game-result');
     if (gameResult) {
-      const result = (gameResult.textContent || '').trim();
-      log('detectResultText: found .game-result=', result);
+      let result = (gameResult.textContent || '').trim();
+      log('detectResultText: found .game-result=', `"${result}"`);
       if (result) {
-        // Clean up result string
-        if (/1\s*-\s*0/.test(result)) return '1-0';
-        if (/0\s*-\s*1/.test(result)) return '0-1';
-        if (/1\/2\s*-\s*1\/2/.test(result) || /½\s*-\s*½/.test(result)) return '1/2-1/2';
-        return result;
+        // Normalize whitespace and extract result
+        result = result.replace(/\s+/g, '');
+        if (result.includes('1-0')) return '1-0';
+        if (result.includes('0-1')) return '0-1'; 
+        if (result.includes('1/2-1/2') || result.includes('½-½')) return '1/2-1/2';
+        // Return raw result if it looks like a chess result
+        if (/^[01½][-\/][01½]/.test(result)) return result;
       }
     }
     
-    // Method 2: Check game over message in chat
-    const gameOverMsg = document.querySelector('.game-over-message-component');
-    if (gameOverMsg) {
-      const txt = (gameOverMsg.textContent || '').trim();
-      if (/1\s*-\s*0/.test(txt)) return '1-0';
-      if (/0\s*-\s*1/.test(txt)) return '0-1';
-      if (/1\/2\s*-\s*1\/2/.test(txt) || /½\s*-\s*½/.test(txt) || /draw/i.test(txt)) return '1/2-1/2';
-    }
+    // Method 2: Search all text content for patterns
+    const allText = document.body.innerText || '';
+    log('detectResultText: searching in body text...');
     
-    // Method 3: Fallback to body text analysis
-    const txt = document.body.innerText || '';
-    if (/\b1\s*[–-]\s*0\b/.test(txt)) return '1-0';
-    if (/\b0\s*[–-]\s*1\b/.test(txt)) return '0-1';
-    if (/1\/2-1\/2|½\s*[–-]\s*½|Draw|Nulle/i.test(txt)) return '1/2-1/2';
+    // Look for exact patterns
+    if (allText.includes('1-0')) return '1-0';
+    if (allText.includes('0-1')) return '0-1';
+    if (allText.includes('1/2-1/2') || allText.includes('½-½')) return '1/2-1/2';
     
-    // Method 4: Personal result indicators
-    if (/You won|Victoire|Gagné/i.test(txt)) return 'win';
-    if (/You lost|Défaite|Perdu/i.test(txt)) return 'loss';
-    if (/Draw|Nulle/i.test(txt)) return 'draw';
+    // Personal indicators as fallback
+    if (/You won|Victoire|Gagné/i.test(allText)) return 'win';
+    if (/You lost|Défaite|Perdu/i.test(allText)) return 'loss';
+    if (/Draw|Nulle/i.test(allText)) return 'draw';
     
     log('detectResultText: no result found');
     return null;
@@ -143,62 +139,22 @@
     const clocks = getClocks();
     if (clocks.length === 0) return { tcString: null, baseMinutes: null };
     
-    // Use first clock (they should have same initial time)
-    const initialSeconds = clocks[0];
-    const initialMinutes = Math.round(initialSeconds / 60);
+    // Use the highest clock (closest to initial time) and round UP to next minute
+    const maxClock = Math.max(...clocks);
+    const initialMinutes = Math.ceil(maxClock / 60);
     
-    log('detectTCFromClocks: firstClock=', initialSeconds, 'seconds, initialMinutes=', initialMinutes);
+    log('detectTCFromClocks: allClocks=', clocks, 'maxClock=', maxClock, 'seconds, roundedUp=', initialMinutes, 'minutes');
     
-    // For exact minutes match, assume no increment (most common)
-    if (initialSeconds % 60 === 0 && initialMinutes > 0) {
-      return {
-        tcString: `${initialMinutes}+0`,
-        baseMinutes: initialMinutes
-      };
+    // Sanity check: reasonable time range
+    if (initialMinutes < 1 || initialMinutes > 90) {
+      log('detectTCFromClocks: unreasonable time, skipping');
+      return { tcString: null, baseMinutes: null };
     }
     
-    // Common time controls on Chess.com (exact matches preferred)
-    const commonTCs = [
-      { base: 1, inc: 0 }, { base: 1, inc: 1 }, { base: 1, inc: 2 },
-      { base: 2, inc: 1 }, { base: 3, inc: 0 }, { base: 3, inc: 2 },
-      { base: 5, inc: 0 }, { base: 5, inc: 3 }, { base: 5, inc: 5 },
-      { base: 10, inc: 0 }, { base: 10, inc: 5 }, { base: 15, inc: 10 },
-      { base: 30, inc: 0 }, { base: 60, inc: 0 }, { base: 90, inc: 30 }
-    ];
-    
-    // Find exact match first
-    for (const tc of commonTCs) {
-      if (tc.base === initialMinutes) {
-        return {
-          tcString: tc.inc > 0 ? `${tc.base}+${tc.inc}` : `${tc.base}+0`,
-          baseMinutes: tc.base
-        };
-      }
-    }
-    
-    // If no exact match, find closest
-    let bestMatch = null;
-    let minDiff = Infinity;
-    
-    for (const tc of commonTCs) {
-      const diff = Math.abs(tc.base - initialMinutes);
-      if (diff < minDiff) {
-        minDiff = diff;
-        bestMatch = tc;
-      }
-    }
-    
-    if (bestMatch && minDiff <= 1) { // Reduce tolerance to 1 minute
-      return {
-        tcString: bestMatch.inc > 0 ? `${bestMatch.base}+${bestMatch.inc}` : `${bestMatch.base}+0`,
-        baseMinutes: bestMatch.base
-      };
-    }
-    
-    // Last resort: use the detected minutes with no increment
-    return { 
-      tcString: initialMinutes > 0 ? `${initialMinutes}+0` : null, 
-      baseMinutes: initialMinutes > 0 ? initialMinutes : null 
+    // Return as X+0 format (assume no increment by default)
+    return {
+      tcString: `${initialMinutes}+0`,
+      baseMinutes: initialMinutes
     };
   }
 
