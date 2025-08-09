@@ -124,7 +124,8 @@
     log('detectResultText: starting detection...');
     
     // Method 1: Look for .game-result specifically
-    const gameResultElements = document.querySelectorAll('.game-result, span.game-result');
+    const gameResultElements = document.querySelectorAll('.game-result, span.game-result, [class*="result"]');
+    log('detectResultText: found', gameResultElements.length, '.game-result elements');
     for (const el of gameResultElements) {
       let result = (el.textContent || '').trim();
       log('detectResultText: found .game-result element with text:', `"${result}"`);
@@ -148,16 +149,40 @@
     }
     
     // Method 3: Check game over message
-    const gameOverMsg = document.querySelector('.game-over-message-component');
+    const gameOverMsg = document.querySelector('.game-over-message-component, [class*="game-over"], [class*="modal"]');
     if (gameOverMsg) {
       const text = (gameOverMsg.textContent || '').trim();
       log('detectResultText: checking game over message:', text);
       if (text.includes('1-0')) return '1-0';
       if (text.includes('0-1')) return '0-1';
-      if (text.includes('1/2-1/2') || text.includes('½-½') || /draw/i.test(text)) return '1/2-1/2';
+      if (text.includes('1/2-1/2') || text.includes('½-½') || /draw/i.test(text) || /égalité/i.test(text)) return '1/2-1/2';
     }
     
-    log('detectResultText: no result found');
+    // Method 4: Look in move list for result notation
+    const moveListResults = document.querySelectorAll('[data-ply] .result-row, [class*="move-list"] .result, [class*="result-row"]');
+    log('detectResultText: found', moveListResults.length, 'move list result elements');
+    for (const el of moveListResults) {
+      const text = (el.textContent || '').trim();
+      log('detectResultText: checking move list result:', `"${text}"`);
+      if (text === '1-0' || text === '0-1' || text === '1/2-1/2' || text === '½-½') return text;
+    }
+    
+    // Method 5: Search anywhere for result patterns 
+    const bodyText = document.body.textContent || '';
+    if (/\b1-0\b/.test(bodyText)) {
+      log('detectResultText: found "1-0" in body text');
+      return '1-0';
+    }
+    if (/\b0-1\b/.test(bodyText)) {
+      log('detectResultText: found "0-1" in body text');
+      return '0-1';
+    }
+    if (/\b(1\/2-1\/2|½-½)\b/.test(bodyText)) {
+      log('detectResultText: found draw notation in body text');
+      return '1/2-1/2';
+    }
+    
+    log('detectResultText: no result found after all methods');
     return null;
   }
 
@@ -310,16 +335,25 @@
   }
 
   function detectColor() {
+    log('detectColor: starting color detection...');
+    
     // Method 1: Check bottom player (you) clock/user component classes
     const bottomClock = document.querySelector('.board-layout-player-bottom .clock-component');
     const bottomUser = document.querySelector('.board-layout-player-bottom .cc-user-username-component');
     
+    log('detectColor: bottomClock found:', !!bottomClock);
+    log('detectColor: bottomUser found:', !!bottomUser);
+    
     if (bottomClock) {
+      const classes = Array.from(bottomClock.classList);
+      log('detectColor: bottomClock classes:', classes);
       if (bottomClock.classList.contains('clock-white')) return 'white';
       if (bottomClock.classList.contains('clock-black')) return 'black';
     }
     
     if (bottomUser) {
+      const classes = Array.from(bottomUser.classList);
+      log('detectColor: bottomUser classes:', classes);
       if (bottomUser.classList.contains('cc-user-username-white')) return 'white';
       if (bottomUser.classList.contains('cc-user-username-black')) return 'black';
     }
@@ -327,11 +361,30 @@
     // Method 2: Check bottom user block
     const bottomUserBlock = document.querySelector('.board-layout-player-bottom .cc-user-block-component');
     if (bottomUserBlock) {
+      const classes = Array.from(bottomUserBlock.classList);
+      log('detectColor: bottomUserBlock classes:', classes);
       if (bottomUserBlock.classList.contains('cc-user-block-white')) return 'white';
       if (bottomUserBlock.classList.contains('cc-user-block-black')) return 'black';
     }
     
-    // Method 3: Check if bottom clock has player turn indicator
+    // Method 3: Look for any color indicators on bottom elements
+    const bottomElements = document.querySelectorAll('.board-layout-player-bottom *');
+    log('detectColor: checking', bottomElements.length, 'bottom elements for color classes');
+    for (const el of bottomElements) {
+      const classes = Array.from(el.classList);
+      const hasWhite = classes.some(cls => cls.includes('white'));
+      const hasBlack = classes.some(cls => cls.includes('black'));
+      if (hasWhite) {
+        log('detectColor: found white class:', classes);
+        return 'white';
+      }
+      if (hasBlack) {
+        log('detectColor: found black class:', classes);
+        return 'black';
+      }
+    }
+    
+    // Method 4: Check if bottom clock has player turn indicator
     const bottomClockWithTurn = document.querySelector('.board-layout-player-bottom .clock-player-turn');
     const topClock = document.querySelector('.board-layout-player-top .clock-component');
     
@@ -341,12 +394,33 @@
       if (topClock.classList.contains('clock-black')) return 'white';
     }
     
-    // Method 4: Fallback to text analysis
+    // Method 5: Look at chess board for first rank pieces
+    const board = document.querySelector('chess-board, .board');
+    if (board) {
+      const squares = board.querySelectorAll('[class*="square-"], [data-square]');
+      // Look for bottom rank (1st rank for white, 8th rank for black)
+      const bottomRankSquares = Array.from(squares).filter(sq => {
+        const classes = sq.className || '';
+        return /square-[a-h][18]/.test(classes) || (sq.dataset?.square && /[a-h][18]/.test(sq.dataset.square));
+      });
+      log('detectColor: found', bottomRankSquares.length, 'bottom rank squares');
+      if (bottomRankSquares.length > 0) {
+        // If we see pieces on rank 1 at bottom, you're white
+        // If we see pieces on rank 8 at bottom, you're black
+        const hasRank1 = bottomRankSquares.some(sq => (sq.className + (sq.dataset?.square || '')).includes('1'));
+        const hasRank8 = bottomRankSquares.some(sq => (sq.className + (sq.dataset?.square || '')).includes('8'));
+        log('detectColor: hasRank1:', hasRank1, 'hasRank8:', hasRank8);
+        if (hasRank1) return 'white';
+        if (hasRank8) return 'black';
+      }
+    }
+    
+    // Method 6: Fallback to text analysis
     const txt = document.body.innerText || '';
     if (/\bWhite\b.*\byou\b/i.test(txt) || /\bVous\b.*Blancs/i.test(txt)) return 'white';
     if (/\bBlack\b.*\byou\b/i.test(txt) || /\bVous\b.*Noirs/i.test(txt)) return 'black';
     
-    log('detectColor: could not determine color');
+    log('detectColor: could not determine color after all methods');
     return null;
   }
 
