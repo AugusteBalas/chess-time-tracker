@@ -42,30 +42,50 @@
     let nodes = [];
     for (const selector of clockSelectors) {
       const found = Array.from(document.querySelectorAll(selector));
+      log('getClocks: selector "' + selector + '" found', found.length, 'elements');
       nodes = nodes.concat(found);
     }
+    log('getClocks: total nodes before filtering:', nodes.length);
     
     // Filter for valid time format and exclude rating-like elements
     nodes = nodes.filter(el => {
       const text = (el.textContent || '').trim();
       const isTimeFormat = /^\d{1,2}:\d{2}(:\d{2})?$/.test(text);
       const isNotRating = !el.closest('.cc-user-rating, .rating, [class*="rating"]');
-      log('getClocks: checking', text, 'isTimeFormat:', isTimeFormat, 'isNotRating:', isNotRating);
+      log('getClocks: checking element with text "' + text + '"', 'isTimeFormat:', isTimeFormat, 'isNotRating:', isNotRating);
       return isTimeFormat && isNotRating;
     });
+    log('getClocks: nodes after filtering:', nodes.length);
     
     const uniq = [];
     const seen = new Set();
     for (const el of nodes) {
       const t = (el.textContent||'').trim();
       const key = t+'|'+(el.offsetTop|0)+'|'+(el.offsetLeft|0);
-      if (!seen.has(key)) { seen.add(key); uniq.push(el); }
+      if (!seen.has(key)) { 
+        seen.add(key); 
+        uniq.push(el); 
+        log('getClocks: added unique element with text "' + t + '"');
+      } else {
+        log('getClocks: skipped duplicate element with text "' + t + '"');
+      }
     }
     
     // Sort by position (top to bottom)
     uniq.sort((a,b) => (a.offsetTop || 0) - (b.offsetTop || 0));
+    log('getClocks: unique nodes after deduplication:', uniq.length);
     
-    const times = uniq.map(el => parseTimeStr((el.textContent||'').trim())).filter(v => v!=null);
+    const times = [];
+    for (let i = 0; i < uniq.length; i++) {
+      const el = uniq[i];
+      const text = (el.textContent||'').trim();
+      const parsedTime = parseTimeStr(text);
+      log('getClocks: parsing "' + text + '" -> ' + parsedTime + ' seconds');
+      if (parsedTime !== null) {
+        times.push(parsedTime);
+      }
+    }
+    
     log('getClocks: final times in seconds:', times);
     return times;
   }
@@ -168,23 +188,34 @@
 
   function detectTCFromClocks() {
     const clocks = getClocks();
-    if (clocks.length === 0) return { tcString: null, baseMinutes: null };
+    log('detectTCFromClocks: raw getClocks() result:', clocks);
+    
+    if (clocks.length === 0) {
+      log('detectTCFromClocks: no clocks found');
+      return { tcString: null, baseMinutes: null };
+    }
     
     // Use the highest clock (closest to initial time) and round UP to next minute
     const maxClock = Math.max(...clocks);
+    log('detectTCFromClocks: Math.max(...clocks) =', maxClock);
+    
     const initialMinutes = Math.ceil(maxClock / 60);
+    log('detectTCFromClocks: Math.ceil(' + maxClock + ' / 60) =', initialMinutes);
     
     log('detectTCFromClocks: allClocks=', clocks, 'maxClock=', maxClock, 'seconds, roundedUp=', initialMinutes, 'minutes');
     
     // Sanity check: reasonable time range
     if (initialMinutes < 1 || initialMinutes > 90) {
-      log('detectTCFromClocks: unreasonable time, skipping');
+      log('detectTCFromClocks: unreasonable time (' + initialMinutes + ' minutes), skipping');
       return { tcString: null, baseMinutes: null };
     }
     
+    const tcString = `${initialMinutes}+0`;
+    log('detectTCFromClocks: final result: tcString=' + tcString + ', baseMinutes=' + initialMinutes);
+    
     // Return as X+0 format (assume no increment by default)
     return {
-      tcString: `${initialMinutes}+0`,
+      tcString: tcString,
       baseMinutes: initialMinutes
     };
   }
