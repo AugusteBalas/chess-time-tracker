@@ -230,29 +230,19 @@
   }
 
   async function waitForTC(maxMs = 2000) {
-    const start = Date.now();
-    let best = { tcString:null, baseMinutes:null, bucket:null };
-    while (Date.now() - start < maxMs) {
-      // Try text-based detection first
-      const t = tryReadTCOnce();
-      if (t.tcString || t.baseMinutes || t.bucket) {
-        best = t;
-        if (t.tcString && (t.baseMinutes!=null) && t.bucket) break;
-      }
-      
-      // If text detection failed, try clock-based detection
-      if (!best.tcString && !best.baseMinutes) {
-        const clockTC = detectTCFromClocks();
-        if (clockTC.tcString || clockTC.baseMinutes) {
-          best.tcString = best.tcString || clockTC.tcString;
-          best.baseMinutes = best.baseMinutes || clockTC.baseMinutes;
-          best.bucket = best.bucket || (best.baseMinutes ? bucketFromBaseMinutes(best.baseMinutes) : null);
-        }
-      }
-      
-      await new Promise(r => setTimeout(r, 200));
+    // Simplify: Use ONLY clock-based detection to avoid confusion
+    const clockTC = detectTCFromClocks();
+    if (clockTC.tcString && clockTC.baseMinutes) {
+      log('waitForTC: using clock detection result:', clockTC);
+      return {
+        tcString: clockTC.tcString,
+        baseMinutes: clockTC.baseMinutes,
+        bucket: bucketFromBaseMinutes(clockTC.baseMinutes)
+      };
     }
-    return best;
+    
+    log('waitForTC: clock detection failed, returning null');
+    return { tcString: null, baseMinutes: null, bucket: null };
   }
 
   function detectOpponent() {
